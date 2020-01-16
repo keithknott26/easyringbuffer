@@ -1,5 +1,5 @@
 # easyringbuffer
-An easy to use float64 and string ringbuffer for use the application backend with examples
+An easy to use float64 and string ringbuffer for use in the application backend, with examples!
 
 ## Description
 This represents an easy way to instantiate and use a string ring buffer or float64 ring buffer in your application.
