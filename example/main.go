@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/keithknott26/easyringbuffer"
 )
 
 type App struct {
-	sync.Mutex
 	Info   *easyringbuffer.StringRingBuffer
 	Warn   *easyringbuffer.StringRingBuffer
 	Error  *easyringbuffer.StringRingBuffer
