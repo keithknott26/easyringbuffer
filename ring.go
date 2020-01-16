@@ -21,7 +21,7 @@ func NewFloat64RingBuffer(capacity int) *Float64RingBuffer {
 	}
 }
 
-func (r *Float64RingBuffer) BufValues() []float64 {
+func (r *Float64RingBuffer) Values() []float64 {
 	return r.Buffer
 }
 func (r *Float64RingBuffer) Reset() {
@@ -120,7 +120,7 @@ func NewStringRingBuffer(capacity int) *StringRingBuffer {
 	}
 }
 
-func (r *StringRingBuffer) BufValues() []string {
+func (r *StringRingBuffer) Values() []string {
 	return r.Buffer
 }
 

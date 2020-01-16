@@ -76,6 +76,6 @@ func main() {
 	fmt.Println(app.Floats.Position(10, 25))
 
 	// clear all the buffer values
-	fmt.Println(app.Floats.Reset())
+	app.Floats.Reset()
 
 }
