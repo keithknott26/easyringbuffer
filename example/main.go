@@ -66,8 +66,11 @@ func main() {
 	// print the float64 buffer capacity
 	fmt.Println(app.Floats.BufCapacity())
 
+	// print the float64 buffer length
+	fmt.Println(app.Floats.Len())
+
 	// print all the buffer values
-	fmt.Println(app.Floats.BufValues())
+	fmt.Println(app.Floats.Values())
 
 	// print all the buffer values between position 1 and 15
 	fmt.Println(app.Floats.Slice(1, 15))
