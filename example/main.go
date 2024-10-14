@@ -3,24 +3,24 @@ package main
 import (
 	"fmt"
 
-	"github.com/keithknott26/easyringbuffer/ringbuffer"
+	"github.com/keithknott26/easyringbuffer"
 )
 
 type App struct {
-	Info   *ringbuffer.RingBuffer[string]
-	Warn   *ringbuffer.RingBuffer[string]
-	Error  *ringbuffer.RingBuffer[string]
-	Fatal  *ringbuffer.RingBuffer[string]
-	Floats *ringbuffer.RingBuffer[float64]
+	Info   *easyringbuffer.RingBuffer[string]
+	Warn   *easyringbuffer.RingBuffer[string]
+	Error  *easyringbuffer.RingBuffer[string]
+	Fatal  *easyringbuffer.RingBuffer[string]
+	Floats *easyringbuffer.RingBuffer[float64]
 }
 
 func NewApp() *App {
 	// Initialize ring buffers with a capacity of 128 (must be a power of two)
-	infoBuffer, _ := ringbuffer.NewRingBuffer
-	warnBuffer, _ := ringbuffer.NewRingBuffer
-	errorBuffer, _ := ringbuffer.NewRingBuffer
-	fatalBuffer, _ := ringbuffer.NewRingBuffer
-	floatBuffer, _ := ringbuffer.NewRingBuffer
+	infoBuffer, _ := easyringbuffer.NewRingBuffer[string](16384)
+	warnBuffer, _ := easyringbuffer.NewRingBuffer[string](16384)
+	errorBuffer, _ := easyringbuffer.NewRingBuffer[string](16384)
+	fatalBuffer, _ := easyringbuffer.NewRingBuffer[string](16384)
+	floatBuffer, _ := easyringbuffer.NewRingBuffer[float64](16384)
 
 	return &App{
 		Info:   infoBuffer,
@@ -100,7 +100,7 @@ func main() {
 // Helper functions to retrieve values from the ring buffer
 
 // getLastN retrieves the last n items from the ring buffer
-func getLastN[T any](rb *ringbuffer.RingBuffer[T], n int) []T {
+func getLastN[T any](rb *easyringbuffer.RingBuffer[T], n int) []T {
 	size := int(rb.Size())
 	if n > size {
 		n = size
@@ -114,7 +114,7 @@ func getLastN[T any](rb *ringbuffer.RingBuffer[T], n int) []T {
 }
 
 // getAllValues retrieves all items from the ring buffer
-func getAllValues[T any](rb *ringbuffer.RingBuffer[T]) []T {
+func getAllValues[T any](rb *easyringbuffer.RingBuffer[T]) []T {
 	size := int(rb.Size())
 	result := make([]T, 0, size)
 	for i := 0; i < size; i++ {
@@ -125,7 +125,7 @@ func getAllValues[T any](rb *ringbuffer.RingBuffer[T]) []T {
 }
 
 // getSlice retrieves items between start and end positions
-func getSlice[T any](rb *ringbuffer.RingBuffer[T], start, end int) []T {
+func getSlice[T any](rb *easyringbuffer.RingBuffer[T], start, end int) []T {
 	size := int(rb.Size())
 	if start < 0 {
 		start = 0

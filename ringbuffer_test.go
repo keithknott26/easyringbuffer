@@ -1,4 +1,4 @@
-package easyringbuffer
+package easyringbuffer_test
 
 import (
 	"errors"
