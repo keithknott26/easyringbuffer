@@ -1,204 +1,134 @@
 package easyringbuffer
 
 import (
-	"sync"
+	"errors"
+	"sync/atomic"
 )
 
-type Float64RingBuffer struct {
-	sync.Mutex
-	Buffer   []float64
-	Length   int
-	Capacity int
-	Tail     int
+var (
+	ErrRingBufferFull  = errors.New("ring buffer is full")
+	ErrRingBufferEmpty = errors.New("ring buffer is empty")
+)
+
+// RingBuffer is a high-performance, thread-safe ring buffer.
+type RingBuffer[T any] struct {
+	buffer       []T
+	mask         uint64
+	writePointer uint64
+	readPointer  uint64
+	writeReserve uint64
+	readReserve  uint64
 }
 
-func NewFloat64RingBuffer(capacity int) *Float64RingBuffer {
-	return &Float64RingBuffer{
-		Buffer:   make([]float64, capacity, capacity),
-		Length:   0,
-		Capacity: capacity,
-		Tail:     0,
+// NewRingBuffer creates a new ring buffer with the specified capacity.
+// The capacity must be a power of two for optimal performance.
+func NewRingBuffer[T any](capacity uint64) (*RingBuffer[T], error) {
+	if capacity == 0 || (capacity&(capacity-1)) != 0 {
+		return nil, errors.New("capacity must be a power of two")
 	}
+	return &RingBuffer[T]{
+		buffer: make([]T, capacity),
+		mask:   capacity - 1,
+	}, nil
 }
 
-func (r *Float64RingBuffer) Values() []float64 {
-	return r.Buffer
-}
-func (r *Float64RingBuffer) Reset() {
-	r.Lock()
-	defer r.Unlock()
-	r.Tail = 0
-	r.Length = 0
-}
-func (r *Float64RingBuffer) Len() int {
-	return r.Length
-}
-
-func (r *Float64RingBuffer) BufCapacity() int {
-	return r.Capacity
-}
-
-func (r *Float64RingBuffer) Add(v float64) {
-	r.Lock()
-	if r.Length < r.Capacity {
-		r.Length += 1
-	}
-	r.Buffer[r.Tail] = v
-	r.Tail = (r.Tail + 1) % r.Capacity
-	r.Unlock()
-}
-
-func (r *Float64RingBuffer) Slice(i, j int) []float64 {
-	r.Lock()
-	defer r.Unlock()
-
-	if r.Length < r.Capacity {
-		if r.Length < j {
-			j = r.Length
+// Enqueue adds an item to the ring buffer.
+// Returns an error if the buffer is full.
+func (rb *RingBuffer[T]) Enqueue(item T) error {
+	for {
+		wp := atomic.LoadUint64(&rb.writePointer)
+		rp := atomic.LoadUint64(&rb.readReserve)
+		if wp-rp >= uint64(len(rb.buffer)) {
+			return ErrRingBufferFull
 		}
-		return r.Buffer[i:j]
-	}
-	s := append(r.Buffer[r.Tail:r.Capacity], r.Buffer[:r.Tail]...)
-	return s[i:j]
-}
-
-func (r *Float64RingBuffer) Position(i, j int) []float64 {
-	r.Lock()
-	defer r.Unlock()
-	// end exceeds length
-	if j > r.Length {
-		j = r.Length
-	}
-	// i exceeds length
-	if i > r.Length {
-		i = 0
-		j = r.Length
-	}
-	// start is less than 0
-	if i < 0 {
-		i = 0
-	}
-	// end is less than 0
-	if j < 0 {
-		i = 0
-		j = r.Length
-	}
-	if r.Length < r.Capacity {
-		if r.Length < j {
-			j = r.Length
+		if atomic.CompareAndSwapUint64(&rb.writePointer, wp, wp+1) {
+			index := wp & rb.mask
+			rb.buffer[index] = item
+			// Update the write reserve pointer
+			for !atomic.CompareAndSwapUint64(&rb.writeReserve, wp, wp+1) {
+				// Spin-wait
+			}
+			return nil
 		}
-		return r.Buffer[i:j]
-	}
-	s := append(r.Buffer[r.Tail:r.Capacity], r.Buffer[:r.Tail]...)
-	return s[i:j]
-}
-
-func (r *Float64RingBuffer) Last(n int) []float64 {
-	r.Lock()
-	start := r.Length - n
-	if start < 0 {
-		start = 0
-	}
-	r.Unlock()
-	return r.Slice(start, r.Length)
-}
-
-type StringRingBuffer struct {
-	sync.Mutex
-	Buffer   []string
-	Length   int
-	Capacity int
-	Tail     int
-}
-
-func NewStringRingBuffer(capacity int) *StringRingBuffer {
-	return &StringRingBuffer{
-		Buffer:   make([]string, capacity, capacity),
-		Length:   0,
-		Capacity: capacity,
-		Tail:     0,
+		// Failed to reserve write pointer, retry
 	}
 }
 
-func (r *StringRingBuffer) Values() []string {
-	return r.Buffer
-}
-
-func (r *StringRingBuffer) Reset() {
-	r.Lock()
-	defer r.Unlock()
-	r.Tail = 0
-	r.Length = 0
-}
-func (r *StringRingBuffer) Len() int {
-	return r.Length
-}
-
-func (r *StringRingBuffer) BufCapacity() int {
-	return r.Capacity
-}
-
-func (r *StringRingBuffer) Add(v string) {
-	r.Lock()
-	if r.Length < r.Capacity {
-		r.Length += 1
-	}
-	r.Buffer[r.Tail] = v
-	r.Tail = (r.Tail + 1) % r.Capacity
-	r.Unlock()
-}
-
-func (r *StringRingBuffer) Slice(i, j int) []string {
-	r.Lock()
-	defer r.Unlock()
-	if r.Length < r.Capacity {
-		if r.Length < j {
-			j = r.Length
+// Dequeue removes and returns an item from the ring buffer.
+// Returns an error if the buffer is empty.
+func (rb *RingBuffer[T]) Dequeue() (T, error) {
+	var zeroValue T
+	for {
+		rp := atomic.LoadUint64(&rb.readPointer)
+		wp := atomic.LoadUint64(&rb.writeReserve)
+		if rp >= wp {
+			return zeroValue, ErrRingBufferEmpty
 		}
-		return r.Buffer[i:j]
-	}
-	s := append(r.Buffer[r.Tail:r.Capacity], r.Buffer[:r.Tail]...)
-	return s[i:j]
-}
-
-func (r *StringRingBuffer) Position(i, j int) []string {
-	r.Lock()
-	defer r.Unlock()
-	// end exceeds length
-	if j > r.Length {
-		j = r.Length
-	}
-	// i exceeds length
-	if i > r.Length {
-		i = 0
-		j = r.Length
-	}
-	// start is less than 0
-	if i < 0 {
-		i = 0
-	}
-	// end is less than 0
-	if j < 0 {
-		i = 0
-		j = r.Length
-	}
-
-	if r.Length < r.Capacity {
-		if r.Length < j {
-			j = r.Length
+		if atomic.CompareAndSwapUint64(&rb.readPointer, rp, rp+1) {
+			index := rp & rb.mask
+			item := rb.buffer[index]
+			// Optional: Clear the slot
+			var zero T
+			rb.buffer[index] = zero
+			// Update the read reserve pointer
+			for !atomic.CompareAndSwapUint64(&rb.readReserve, rp, rp+1) {
+				// Spin-wait
+			}
+			return item, nil
 		}
-		return r.Buffer[i:j]
+		// Failed to reserve read pointer, retry
 	}
-	s := append(r.Buffer[r.Tail:r.Capacity], r.Buffer[:r.Tail]...)
-	return s[i:j]
 }
 
-func (r *StringRingBuffer) Last(n int) []string {
-	r.Lock()
-	start := r.Length - n
-	if start < 0 {
-		start = 0
+// GetAt retrieves the item at the given index relative to the read pointer.
+// Index 0 corresponds to the oldest item.
+func (rb *RingBuffer[T]) GetAt(index int) (T, error) {
+	var zeroValue T
+	rp := atomic.LoadUint64(&rb.readReserve)
+	wp := atomic.LoadUint64(&rb.writeReserve)
+	size := wp - rp
+	if uint64(index) >= size {
+		return zeroValue, errors.New("index out of range")
 	}
-	r.Unlock()
-	return r.Slice(start, r.Length)
+	actualIndex := (rp + uint64(index)) & rb.mask
+	return rb.buffer[actualIndex], nil
+}
+
+// IsEmpty checks if the ring buffer is empty.
+func (rb *RingBuffer[T]) IsEmpty() bool {
+	rp := atomic.LoadUint64(&rb.readReserve)
+	wp := atomic.LoadUint64(&rb.writePointer)
+	return rp >= wp
+}
+
+// IsFull checks if the ring buffer is full.
+func (rb *RingBuffer[T]) IsFull() bool {
+	wp := atomic.LoadUint64(&rb.writePointer)
+	rp := atomic.LoadUint64(&rb.readReserve)
+	return wp-rp >= uint64(len(rb.buffer))
+}
+
+// Capacity returns the capacity of the ring buffer.
+func (rb *RingBuffer[T]) Capacity() uint64 {
+	return uint64(len(rb.buffer))
+}
+
+// Size returns the current number of items in the ring buffer.
+func (rb *RingBuffer[T]) Size() uint64 {
+	rp := atomic.LoadUint64(&rb.readReserve)
+	wp := atomic.LoadUint64(&rb.writePointer)
+	return wp - rp
+}
+
+// Reset clears all items in the ring buffer.
+func (rb *RingBuffer[T]) Reset() {
+	atomic.StoreUint64(&rb.readPointer, 0)
+	atomic.StoreUint64(&rb.writePointer, 0)
+	atomic.StoreUint64(&rb.readReserve, 0)
+	atomic.StoreUint64(&rb.writeReserve, 0)
+	// Clear buffer (optional)
+	var zero T
+	for i := range rb.buffer {
+		rb.buffer[i] = zero
+	}
 }
