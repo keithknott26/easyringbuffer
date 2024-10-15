@@ -22,7 +22,7 @@ type RingBuffer[T any] struct {
 }
 
 // New creates a new ring buffer with the specified capacity.
-func New[T any](capacity int) *RingBuffer[T] {
+func NewRingBuffer[T any](capacity int) *RingBuffer[T] {
 	if capacity <= 0 {
 		panic("capacity must be greater than 0")
 	}

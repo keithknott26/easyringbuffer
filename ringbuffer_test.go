@@ -1,16 +1,14 @@
-package easyringbuffer_test
+package easyringbuffer
 
 import (
 	"errors"
 	"sync"
 	"testing"
-
-	"github.com/keithknott26/easyringbuffer"
 )
 
 func TestNewRingBuffer(t *testing.T) {
 	// Test creating a ring buffer with valid capacity
-	rb := easyringbuffer.New[int](10)
+	rb := NewRingBuffer[int](10)
 	if rb == nil {
 		t.Fatal("Expected a new ring buffer instance, got nil")
 	}
@@ -21,14 +19,14 @@ func TestNewRingBuffer(t *testing.T) {
 	// Test creating a ring buffer with invalid capacity
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatal("Expected panic when creating ring buffer with capacity 0, but did not panic")
+			t.Fatal("Expected panic when creating ring buffer with capacity <= 0, but did not panic")
 		}
 	}()
-	easyringbuffer.New
+	NewRingBuffer[int](0) // Should panic
 }
 
 func TestEnqueueDequeue(t *testing.T) {
-	rb := easyringbuffer.New[int](5)
+	rb := NewRingBuffer[int](5)
 
 	// Enqueue items
 	for i := 1; i <= 5; i++ {
@@ -45,7 +43,7 @@ func TestEnqueueDequeue(t *testing.T) {
 
 	// Enqueue should return error now
 	err := rb.Enqueue(6)
-	if !errors.Is(err, easyringbuffer.ErrRingBufferFull) {
+	if !errors.Is(err, ErrRingBufferFull) {
 		t.Errorf("Expected ErrRingBufferFull, got %v", err)
 	}
 
@@ -67,13 +65,13 @@ func TestEnqueueDequeue(t *testing.T) {
 
 	// Dequeue should return error now
 	_, err = rb.Dequeue()
-	if !errors.Is(err, easyringbuffer.ErrRingBufferEmpty) {
+	if !errors.Is(err, ErrRingBufferEmpty) {
 		t.Errorf("Expected ErrRingBufferEmpty, got %v", err)
 	}
 }
 
 func TestGetAllAndGetLastN(t *testing.T) {
-	rb := easyringbuffer.New[int](5)
+	rb := NewRingBuffer[int](5)
 
 	// Enqueue items
 	for i := 1; i <= 5; i++ {
@@ -112,11 +110,11 @@ func TestGetAllAndGetLastN(t *testing.T) {
 }
 
 func TestPeek(t *testing.T) {
-	rb := easyringbuffer.New[int](5)
+	rb := NewRingBuffer[int](5)
 
 	// Peek on empty buffer
 	_, err := rb.Peek()
-	if !errors.Is(err, easyringbuffer.ErrRingBufferEmpty) {
+	if !errors.Is(err, ErrRingBufferEmpty) {
 		t.Errorf("Expected ErrRingBufferEmpty, got %v", err)
 	}
 
@@ -146,7 +144,7 @@ func TestPeek(t *testing.T) {
 }
 
 func TestLenAndCapacity(t *testing.T) {
-	rb := easyringbuffer.New[int](5)
+	rb := NewRingBuffer[int](5)
 
 	if rb.Len() != 0 {
 		t.Errorf("Expected Len() == 0, got %d", rb.Len())
@@ -171,7 +169,7 @@ func TestLenAndCapacity(t *testing.T) {
 }
 
 func TestIsEmptyAndIsFull(t *testing.T) {
-	rb := easyringbuffer.New[int](3)
+	rb := NewRingBuffer[int](3)
 
 	if !rb.IsEmpty() {
 		t.Errorf("Expected IsEmpty() == true")
@@ -190,6 +188,7 @@ func TestIsEmptyAndIsFull(t *testing.T) {
 	}
 
 	_ = rb.Enqueue(2)
+	_ = rb.Enqueue(3)
 	if !rb.IsFull() {
 		t.Errorf("Expected IsFull() == true")
 	}
@@ -201,7 +200,7 @@ func TestIsEmptyAndIsFull(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	rb := easyringbuffer.New[int](10)
+	rb := NewRingBuffer[int](3)
 
 	for i := 1; i <= 3; i++ {
 		_ = rb.Enqueue(i)
@@ -229,7 +228,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestWrapAround(t *testing.T) {
-	rb := easyringbuffer.New[int](3)
+	rb := NewRingBuffer[int](3)
 
 	_ = rb.Enqueue(1)
 	_ = rb.Enqueue(2)
@@ -254,7 +253,7 @@ func TestWrapAround(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	rb := easyringbuffer.New[int](5000)
+	rb := NewRingBuffer[int](10)
 
 	var wg sync.WaitGroup
 	numProducers := 5
@@ -272,7 +271,7 @@ func TestConcurrentAccess(t *testing.T) {
 					if err == nil {
 						break
 					}
-					if !errors.Is(err, easyringbuffer.ErrRingBufferFull) {
+					if !errors.Is(err, ErrRingBufferFull) {
 						t.Errorf("Unexpected error on Enqueue: %v", err)
 						return
 					}
@@ -299,7 +298,7 @@ func TestConcurrentAccess(t *testing.T) {
 					consumedItems = append(consumedItems, item)
 					consumedCount++
 					mu.Unlock()
-				} else if errors.Is(err, easyringbuffer.ErrRingBufferEmpty) {
+				} else if errors.Is(err, ErrRingBufferEmpty) {
 					// Buffer is empty, check if producers are done
 					mu.Lock()
 					done := consumedCount >= totalItems
@@ -339,7 +338,8 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestRingBufferGeneric(t *testing.T) {
 	// Test with strings
-	rb := easyringbuffer.New[string](3)
+	rb := NewRingBuffer[string](3)
+
 	_ = rb.Enqueue("one")
 	_ = rb.Enqueue("two")
 	_ = rb.Enqueue("three")
@@ -357,7 +357,7 @@ func TestRingBufferGeneric(t *testing.T) {
 		ID   int
 		Name string
 	}
-	rbStruct := easyringbuffer.New[MyStruct](3)
+	rbStruct := NewRingBuffer[MyStruct](3)
 	_ = rbStruct.Enqueue(MyStruct{ID: 1, Name: "Alice"})
 	_ = rbStruct.Enqueue(MyStruct{ID: 2, Name: "Bob"})
 
@@ -372,7 +372,7 @@ func TestRingBufferGeneric(t *testing.T) {
 
 func TestEnqueueNil(t *testing.T) {
 	// Note: Only applicable if T can be a pointer type
-	rb := easyringbuffer.New[*int](1)
+	rb := NewRingBuffer[*int](3)
 
 	var ptr *int = nil
 	err := rb.Enqueue(ptr)
@@ -385,6 +385,6 @@ func TestEnqueueNil(t *testing.T) {
 		t.Errorf("Unexpected error on Dequeue: %v", err)
 	}
 	if item != nil {
-		t.Errorf("Expected nil item, got %v", item)
+		t.Errorf("Expected empty item, got %v", item)
 	}
 }
