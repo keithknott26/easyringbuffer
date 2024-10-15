@@ -2,133 +2,156 @@ package easyringbuffer
 
 import (
 	"errors"
-	"sync/atomic"
+	"sync"
 )
 
+// Error messages for ring buffer operations.
 var (
 	ErrRingBufferFull  = errors.New("ring buffer is full")
 	ErrRingBufferEmpty = errors.New("ring buffer is empty")
 )
 
-// RingBuffer is a high-performance, thread-safe ring buffer.
+// RingBuffer is a thread-safe ring buffer implementation.
 type RingBuffer[T any] struct {
-	buffer       []T
-	mask         uint64
-	writePointer uint64
-	readPointer  uint64
-	writeReserve uint64
-	readReserve  uint64
+	buffer   []T
+	capacity int
+	size     int
+	head     int
+	tail     int
+	mu       sync.Mutex
 }
 
-// NewRingBuffer creates a new ring buffer with the specified capacity.
-// The capacity must be a power of two for optimal performance.
-func NewRingBuffer[T any](capacity uint64) (*RingBuffer[T], error) {
-	if capacity == 0 || (capacity&(capacity-1)) != 0 {
-		return nil, errors.New("capacity must be a power of two")
+// New creates a new ring buffer with the specified capacity.
+func New[T any](capacity int) *RingBuffer[T] {
+	if capacity <= 0 {
+		panic("capacity must be greater than 0")
 	}
 	return &RingBuffer[T]{
-		buffer: make([]T, capacity),
-		mask:   capacity - 1,
-	}, nil
+		buffer:   make([]T, capacity),
+		capacity: capacity,
+	}
 }
 
 // Enqueue adds an item to the ring buffer.
 // Returns an error if the buffer is full.
 func (rb *RingBuffer[T]) Enqueue(item T) error {
-	for {
-		wp := atomic.LoadUint64(&rb.writePointer)
-		rp := atomic.LoadUint64(&rb.readReserve)
-		if wp-rp >= uint64(len(rb.buffer)) {
-			return ErrRingBufferFull
-		}
-		if atomic.CompareAndSwapUint64(&rb.writePointer, wp, wp+1) {
-			index := wp & rb.mask
-			rb.buffer[index] = item
-			// Update the write reserve pointer
-			for !atomic.CompareAndSwapUint64(&rb.writeReserve, wp, wp+1) {
-				// Spin-wait
-			}
-			return nil
-		}
-		// Failed to reserve write pointer, retry
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	if rb.size == rb.capacity {
+		return ErrRingBufferFull
 	}
+
+	rb.buffer[rb.tail] = item
+	rb.tail = (rb.tail + 1) % rb.capacity
+	rb.size++
+
+	return nil
 }
 
-// Dequeue removes and returns an item from the ring buffer.
+// Dequeue removes and returns the oldest item from the ring buffer.
 // Returns an error if the buffer is empty.
 func (rb *RingBuffer[T]) Dequeue() (T, error) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
 	var zeroValue T
-	for {
-		rp := atomic.LoadUint64(&rb.readPointer)
-		wp := atomic.LoadUint64(&rb.writeReserve)
-		if rp >= wp {
-			return zeroValue, ErrRingBufferEmpty
-		}
-		if atomic.CompareAndSwapUint64(&rb.readPointer, rp, rp+1) {
-			index := rp & rb.mask
-			item := rb.buffer[index]
-			// Optional: Clear the slot
-			var zero T
-			rb.buffer[index] = zero
-			// Update the read reserve pointer
-			for !atomic.CompareAndSwapUint64(&rb.readReserve, rp, rp+1) {
-				// Spin-wait
-			}
-			return item, nil
-		}
-		// Failed to reserve read pointer, retry
+	if rb.size == 0 {
+		return zeroValue, ErrRingBufferEmpty
 	}
+
+	item := rb.buffer[rb.head]
+	// Optional: Clear the slot for garbage collection.
+	rb.buffer[rb.head] = zeroValue
+	rb.head = (rb.head + 1) % rb.capacity
+	rb.size--
+
+	return item, nil
 }
 
-// GetAt retrieves the item at the given index relative to the read pointer.
-// Index 0 corresponds to the oldest item.
-func (rb *RingBuffer[T]) GetAt(index int) (T, error) {
-	var zeroValue T
-	rp := atomic.LoadUint64(&rb.readReserve)
-	wp := atomic.LoadUint64(&rb.writeReserve)
-	size := wp - rp
-	if uint64(index) >= size {
-		return zeroValue, errors.New("index out of range")
+// GetAll returns all items in the buffer in order from oldest to newest.
+func (rb *RingBuffer[T]) GetAll() []T {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	result := make([]T, rb.size)
+	for i := 0; i < rb.size; i++ {
+		index := (rb.head + i) % rb.capacity
+		result[i] = rb.buffer[index]
 	}
-	actualIndex := (rp + uint64(index)) & rb.mask
-	return rb.buffer[actualIndex], nil
+	return result
+}
+
+// GetLastN returns the last N items from the buffer.
+func (rb *RingBuffer[T]) GetLastN(n int) []T {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	if n > rb.size {
+		n = rb.size
+	}
+
+	result := make([]T, n)
+	for i := 0; i < n; i++ {
+		index := (rb.tail - n + i + rb.capacity) % rb.capacity
+		result[i] = rb.buffer[index]
+	}
+	return result
+}
+
+// Peek returns the next item without removing it from the buffer.
+// Returns an error if the buffer is empty.
+func (rb *RingBuffer[T]) Peek() (T, error) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	var zeroValue T
+	if rb.size == 0 {
+		return zeroValue, ErrRingBufferEmpty
+	}
+
+	return rb.buffer[rb.head], nil
+}
+
+// Len returns the current number of items in the buffer.
+func (rb *RingBuffer[T]) Len() int {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	return rb.size
+}
+
+// Capacity returns the capacity of the ring buffer.
+func (rb *RingBuffer[T]) Capacity() int {
+	return rb.capacity
 }
 
 // IsEmpty checks if the ring buffer is empty.
 func (rb *RingBuffer[T]) IsEmpty() bool {
-	rp := atomic.LoadUint64(&rb.readReserve)
-	wp := atomic.LoadUint64(&rb.writePointer)
-	return rp >= wp
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	return rb.size == 0
 }
 
 // IsFull checks if the ring buffer is full.
 func (rb *RingBuffer[T]) IsFull() bool {
-	wp := atomic.LoadUint64(&rb.writePointer)
-	rp := atomic.LoadUint64(&rb.readReserve)
-	return wp-rp >= uint64(len(rb.buffer))
-}
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
 
-// Capacity returns the capacity of the ring buffer.
-func (rb *RingBuffer[T]) Capacity() uint64 {
-	return uint64(len(rb.buffer))
-}
-
-// Size returns the current number of items in the ring buffer.
-func (rb *RingBuffer[T]) Size() uint64 {
-	rp := atomic.LoadUint64(&rb.readReserve)
-	wp := atomic.LoadUint64(&rb.writePointer)
-	return wp - rp
+	return rb.size == rb.capacity
 }
 
 // Reset clears all items in the ring buffer.
 func (rb *RingBuffer[T]) Reset() {
-	atomic.StoreUint64(&rb.readPointer, 0)
-	atomic.StoreUint64(&rb.writePointer, 0)
-	atomic.StoreUint64(&rb.readReserve, 0)
-	atomic.StoreUint64(&rb.writeReserve, 0)
-	// Clear buffer (optional)
-	var zero T
-	for i := range rb.buffer {
-		rb.buffer[i] = zero
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	var zeroValue T
+	for i := 0; i < rb.capacity; i++ {
+		rb.buffer[i] = zeroValue
 	}
+	rb.size = 0
+	rb.head = 0
+	rb.tail = 0
 }
